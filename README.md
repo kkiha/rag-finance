@@ -151,18 +151,18 @@ rag-finance/
 
 -------------------------------------------------------------------------------
 
-Project Overview
+## Project Overview
 
 This repository is a capstone project (Hanyang University, Data Science, 2025). We build an end-to-end Retrieval-Augmented Generation (RAG) pipeline that retrieves recent Korean finance texts (news and analyst reports) and generates structured Korean stock reports using Groq LLM.
 
-Key Components
+### Key Components
 - Ingestion & Cleaning: Load `.txt/.html` under `data/raw/**`, remove HTML tags and unwanted phrases, and assign `source_type` using folder names (e.g., `News/Report`).
 - Chunking with Company Metadata: Split texts into ~800 chars (+100 overlap) and attach metadata (`company`, `company_code`, `chunk_id`).
 - Embedding & Indexing: Encode with `jhgan/ko-sroberta-nli` and store FAISS index under `indexes/all/`.
 - Hybrid Retrieval: Combine BM25 (hard expansion) and FAISS (soft expansion), optionally rerank with Cross-Encoder (`BAAI/bge-reranker-v2-m3`) and apply MMR.
 - LLM Report Generation: Serialize retrieved documents into context and call Groq LLM to produce a standardized report: `[Title] / [Summary] / [Table] / [Analysis] / [Opinion]`.
 
-Note on Data
+### Note on Data
 - For size and copyright reasons, raw texts under `data/` are NOT included in the repository. Please place your own data locally following the instructions below.
 
 Quick Start
@@ -213,7 +213,7 @@ python -m rag_finance.cli.main retrieve --config configs/default.yaml --q "삼�
    --context-out logs/context.json --docs-out logs/retrieved_docs.json
    ```
 
-Project Structure
+### Project Structure
 ```
 rag-finance/
 ├─ configs/
@@ -235,12 +235,12 @@ rag-finance/
     └─ generate_report.py
 ```
 
-Configuration Tips
+### Configuration Tips
 - Set `retrieval.ce.enable: false` to disable Cross-Encoder reranking on CPU-limited setups.
 - Rebuild the FAISS index after changing data or parameters.
 - `requirements.txt` includes Groq SDK (`groq`) and `python-dotenv`. Store `GROQ_API_KEY` in `.env` for convenience.
 
-Changelog (Summary)
+### Changelog (Summary)
 - 0.3.2: Document data exclusion (`data/` gitignored) and data placement steps.
 - 0.3.1: Consolidate dependencies into a single `requirements.txt`.
 - 0.3.0: Add Groq LLM report generation CLI.
