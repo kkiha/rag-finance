@@ -1,0 +1,150 @@
+# rag-finance
+
+이 저장소는 **한양대학교 데이터사이언스학부 2025 졸업프로젝트** “RAG 기반 증권 리포트 자동화”를 위해 구축한 코드베이스입니다. 목표는 최신 금융 뉴스·애널리스트 리포트를 검색·활용해 **주식 리포트를 자동으로 생성**하는 End-to-End 파이프라인을 구현하고 운영 효율성과 리서치 품질을 동시에 향상시키는 것입니다.
+
+핵심 아이디어는 Retrieval-Augmented Generation(RAG)을 중심으로, (1) 원문 데이터 정제와 임베딩 인덱스 구축, (2) 기업 메타데이터와 키워드에 기반한 하이브리드 검색, (3) Groq LLM과 Few-shot 프롬프트를 이용한 한국어 리포트 생성으로 이어지는 전체 자동화 흐름을 제공하는 것입니다. 아래 설명에는 프로젝트에서 채택한 아키텍처와 사용 방법을 정리해 두었습니다.
+
+> 참고: 용량 이슈로 인해 `data/` 디렉터리의 원문 텍스트는 Git 저장소에 포함되지 않습니다. 레포지토리를 클론한 뒤 직접 데이터를 배치해야 하며, 아래 “데이터 배치” 절차를 따르세요.
+
+-------------------------------------------------------------------------------
+핵심 워크플로
+-------------------------------------------------------------------------------
+
+1. **파일 로드 및 정제** (`rag_finance.ingestion`)  
+   `data/raw/**`에 배치된 `.txt/.html`을 읽어 HTML 태그 제거, URL/불필요 구절 필터링을 수행합니다. 경로에 `Report/News` 등이 포함된 경우 `source_type`으로 기록합니다.
+
+2. **기업 메타데이터 부착 + 청킹** (`rag_finance.chunking.splitter`)  
+   `RecursiveCharacterTextSplitter`로 텍스트를 800자(+100 overlap)로 청킹합니다. 리포트 문서는 본문 전체에서 기업명·종목코드를 추정해 각 청크 메타데이터(`company`, `company_code`, `chunk_id`)에 저장합니다.
+
+3. **임베딩 & 인덱싱** (`rag_finance.indexing.faiss_index`)  
+   `jhgan/ko-sroberta-nli` 임베딩으로 모든 청크를 벡터화하고 `indexes/all/`에 FAISS 인덱스를 저장합니다.
+
+4. **질의 처리 및 검색** (`rag_finance.retrieval.pipeline`)  
+   - 질의에서 기업명/코드를 추출하고, 해당 회사의 키워드를 `keyword_json/{회사명}_keyword.json`에서 로드합니다.  
+   - BM25(하드 확장) + FAISS(소프트 확장)을 각각 `pool_k_*` 만큼 검색 후 RRF로 합칩니다.  
+   - 하이브리드 점수(임베딩 유사도 + 기업 매칭 보너스 + 키워드 보조점수)를 계산합니다.  
+   - `retrieval.ce.enable: true`일 때만 Cross-Encoder(`BAAI/bge-reranker-v2-m3`)로 상위 후보를 재점수화하고 가중합합니다.  
+   - `apply_mmr_after`가 `true`이면 MMR로 유사 후보를 제거하고 최종 상위 `k`개 문서를 반환합니다.
+
+5. **LLM 리포트 생성** (`scripts.generate_report`)  
+   - Retrieval로 얻은 `Document` 리스트를 요약/정리해 Groq LLM에 전달할 컨텍스트로 직렬화합니다.  
+   - 모델 호출 시 메시지 구조는 아래와 같습니다.
+     ```text
+     [System]
+     너는 한국어를 사용하는 증권사 애널리스트야.
+     다음 표준 형식만 사용하여 특정 기업의 한국어 리포트를 작성해야 해.
+     [Title]
+     [Summary]
+     [Table]
+     [Analysis]
+     [Opinion]
+     형식 외의 추가 설명은 출력하지 마.
+     출처 표시는 하지 마.
+     숫자(실적, 성장률, 가이던스 등)는 가능하면 정량적으로 제시하고, 출처 추정/상상은 하지 마.
+
+     [User]
+     [참고 문서]
+     {retrieval 컨텍스트}
+
+     [질문]
+     {사용자 질의(e.g. {기업명}의 최근 동향에 대한 한국어 리포트를 작성해 줘.)}
+     ```
+   - (선택사항) 필요 시 few-shot 예시(JSONL)를 순차적으로 `[User] → [Assistant]` 메시지로 삽입한 뒤 위 템플릿을 붙입니다.  
+   - Groq SDK(`groq` 패키지`)로 `llama3-70b-8192` 모델을 호출하며, 출력은 `[Title]/[Summary]/[Table]/[Analysis]/[Opinion]` 포맷으로 반환됩니다.
+
+-------------------------------------------------------------------------------
+빠른 시작
+-------------------------------------------------------------------------------
+
+1) **환경 구성**
+- (권장) 가상환경 생성
+  ```powershell
+  python -m venv .venv
+  .\.venv\Scripts\Activate.ps1
+  ```
+- 의존성 설치
+  ```powershell
+  pip install -r requirements.txt
+  ```
+- GPU가 없다면 `configs/default.yaml`의 `embedding.device`, `retrieval.ce.device`를 `cpu`로 바꿉니다.
+- Groq LLM 연동에 필요한 `groq`, `python-dotenv` 패키지도 `requirements.txt`에 포함되어 있습니다.
+
+2) **데이터 배치**
+- 레포 클론 직후에는 `data/` 폴더가 비어 있습니다. 아래 예시처럼 기본 디렉터리를 만든 뒤 원문을 복사하세요.
+   ```powershell
+   mkdir data
+   mkdir data\raw
+   mkdir data\raw\News
+   mkdir data\raw\Report
+   ```
+- 노트북에서 사용한 원본 텍스트(`.txt/.html/.json` 등)를 `data/raw/News`, `data/raw/Report` 등으로 분류해 넣습니다. 하위 폴더명은 자동 타입 판별에 활용됩니다.
+- 회사별 키워드는 `keyword_json/{회사명}_keyword.json` 형식으로 저장합니다.
+
+3) **인덱스 생성**
+```powershell
+python -m scripts.build_index --config configs/default.yaml
+```
+예상 로그: raw 파일 개수 → 정제된 문서 수 → 생성된 청크 수 → 저장된 인덱스 경로.
+
+4) **검색 실행**
+```powershell
+python -m rag_finance.cli.main retrieve --config configs/default.yaml --q "삼성전자의 최근 동향에 대한 한국어 리포트를 작성해 줘." --topk 10
+```
+출력에는 디버그 정보(기업/종목코드, 선택 키워드, 풀 크기 등)와 상위 근거 스니펫이 포함됩니다. CE가 활성화되어 있으면 `[rerank] CE scoring` 진행률이 표시됩니다.
+
+5) **Groq API로 리포트 생성**
+- Groq API Key(`GROQ_API_KEY`)를 환경변수로 설정하거나 `.env` 파일에 저장합니다.
+- few-shot 예시(JSONL)가 있는 경우 `--examples-dir` 인자를 통해 전달할 수 있습니다.
+- CLI 실행
+   ```powershell
+   python -m scripts.generate_report `
+         --config configs/default.yaml `
+         --q "삼성전자의 최근 동향에 대한 한국어 리포트를 작성해 줘." `
+         --topk 10 `
+         --model llama-3.3-70b-versatile `
+         --output reports/samsung_latest.txt
+   ```
+- 실행 후 `reports/` 폴더에 `[Title]/[Summary]/[Table]/[Analysis]/[Opinion]` 형식의 리포트가 생성됩니다.
+- Retrieval 근거를 파일로 남기려면 `--context-out logs/context.json --docs-out logs/retrieved_docs.json` 등을 추가하세요.
+
+-------------------------------------------------------------------------------
+구성 요약
+-------------------------------------------------------------------------------
+
+```
+rag-finance/
+├─ configs/
+│   └─ default.yaml                # 노트북 하이퍼파라미터와 동일한 설정
+├─ data/ (gitignored)
+│   └─ raw/                        # 원본 텍스트 (News/Report 등 하위 폴더 권장)
+├─ indexes/
+│   └─ all/                        # build_index 실행 시 생성되는 FAISS 인덱스
+├─ keyword_json/                   # 회사별 키워드 JSON
+├─ llm/                            # Groq few-shot 예시, 프롬프트 템플릿, 출력 저장소
+├─ rag_finance/
+│   ├─ ingestion/                  # 파일 로딩·정제 로직
+│   ├─ chunking/                   # 청킹 + 기업 메타데이터 주입
+│   ├─ indexing/                   # 임베딩/FAISS 저장
+│   ├─ entities/                   # 기업·키워드 유틸
+│   └─ retrieval/                  # BM25+FAISS+RRF+CE+MMR 파이프라인
+└─ scripts/
+   ├─ build_index.py              # 노트북 인덱스 구축 셀에 대응
+   └─ generate_report.py          # Retrieval+LLM 생성 CLI
+```
+
+-------------------------------------------------------------------------------
+환경 설정 포인트
+-------------------------------------------------------------------------------
+
+- `retrieval.ce.enable: false`로 두면 CE 없이 하이브리드 점수만으로 랭킹합니다. CPU 환경에서 유용합니다.
+- 새로운 데이터를 넣거나 설정을 바꾸면 반드시 `build_index`를 다시 실행해 인덱스를 최신화하세요.
+- `requirements.txt`에는 노트북에서 사용한 핵심 라이브러리만 포함했습니다. 필요 시 `langchain`, `sentence-transformers`, `faiss-cpu` 혹은 GPU 대응 패키지를 추가로 설치해야 할 수 있습니다.
+- Groq API를 활용한 리포트 생성 기능을 사용하려면 `groq` Python SDK와 API Key가 필요합니다. `.env`에 `GROQ_API_KEY`를 저장하면 CLI에서 자동으로 불러옵니다.
+
+변경 로그
+
+- 0.3.2: `data/` 디렉터리 Git 제외 안내 및 데이터 배치 절차 업데이트
+- 0.3.1: Groq 관련 의존성을 기본 `requirements.txt`로 통합
+- 0.3.0: Groq LLM을 이용한 리포트 생성 CLI/유틸 추가
+- 0.2.0: 기업 메타데이터(기업명/종목코드) 자동 추출, CE 비활성화 옵션, README 워크플로 정리
+- 0.1.0: 노트북 기반 초기 파이프라인(ingestion → chunk → FAISS → BM25/FAISS → CE → MMR)

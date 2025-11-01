@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+
+# Data/Outputs
+data/
+*.parquet
+*.feather
+
+# Jupyter/IDE
+.ipynb_checkpoints/
+.vscode/
+.idea/

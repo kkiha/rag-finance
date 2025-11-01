@@ -1,0 +1,11 @@
+langchain
+langchain-community
+sentence-transformers
+faiss-cpu
+beautifulsoup4
+tqdm
+numpy
+omegaconf
+groq>=0.5.0
+python-dotenv>=1.0
+protobuf<4
