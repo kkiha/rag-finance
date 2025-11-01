@@ -148,3 +148,99 @@ rag-finance/
 - 0.3.0: Groq LLM을 이용한 리포트 생성 CLI/유틸 추가
 - 0.2.0: 기업 메타데이터(기업명/종목코드) 자동 추출, CE 비활성화 옵션, README 워크플로 정리
 - 0.1.0: 노트북 기반 초기 파이프라인(ingestion → chunk → FAISS → BM25/FAISS → CE → MMR)
+
+-------------------------------------------------------------------------------
+
+Project Overview
+
+This repository is a capstone project (Hanyang University, Data Science, 2025). We build an end-to-end Retrieval-Augmented Generation (RAG) pipeline that retrieves recent Korean finance texts (news and analyst reports) and generates structured Korean stock reports using Groq LLM.
+
+Key Components
+- Ingestion & Cleaning: Load `.txt/.html` under `data/raw/**`, remove HTML tags and unwanted phrases, and assign `source_type` using folder names (e.g., `News/Report`).
+- Chunking with Company Metadata: Split texts into ~800 chars (+100 overlap) and attach metadata (`company`, `company_code`, `chunk_id`).
+- Embedding & Indexing: Encode with `jhgan/ko-sroberta-nli` and store FAISS index under `indexes/all/`.
+- Hybrid Retrieval: Combine BM25 (hard expansion) and FAISS (soft expansion), optionally rerank with Cross-Encoder (`BAAI/bge-reranker-v2-m3`) and apply MMR.
+- LLM Report Generation: Serialize retrieved documents into context and call Groq LLM to produce a standardized report: `[Title] / [Summary] / [Table] / [Analysis] / [Opinion]`.
+
+Note on Data
+- For size and copyright reasons, raw texts under `data/` are NOT included in the repository. Please place your own data locally following the instructions below.
+
+Quick Start
+
+1) Environment
+- Create a virtual environment and install dependencies.
+   ```powershell
+   python -m venv .venv
+   .\.venv\Scripts\Activate.ps1
+   pip install -r requirements.txt
+   ```
+- If you don’t have a GPU, set `embedding.device` and `retrieval.ce.device` to `cpu` in `configs/default.yaml`.
+
+2) Data Placement
+- Create directories and copy your raw texts.
+   ```powershell
+   mkdir data
+   mkdir data\raw
+   mkdir data\raw\News
+   mkdir data\raw\Report
+   ```
+- Put `.txt/.html/.json` files into `data/raw/News` and `data/raw/Report` (folder names help auto-typing).
+- Company keyword files go to `keyword_json/{CompanyName}_keyword.json`.
+
+3) Build Index
+```powershell
+python -m scripts.build_index --config configs/default.yaml
+```
+
+4) Retrieval (optional debug run)
+```powershell
+python -m rag_finance.cli.main retrieve --config configs/default.yaml --q "삼성전자의 최근 동향에 대한 한국어 리포트를 작성해 줘." --topk 10
+```
+
+5) Generate Report with Groq LLM
+- Set `GROQ_API_KEY` via environment or `.env`.
+- Run CLI:
+   ```powershell
+   python -m scripts.generate_report `
+            --config configs/default.yaml `
+            --q "삼성전자의 최근 동향에 대한 한국어 리포트를 작성해 줘." `
+            --topk 10 `
+            --model llama-3.3-70b-versatile `
+            --output reports/samsung_latest.txt
+   ```
+- To persist retrieval artifacts, add:
+   ```powershell
+   --context-out logs/context.json --docs-out logs/retrieved_docs.json
+   ```
+
+Project Structure
+```
+rag-finance/
+├─ configs/
+│   └─ default.yaml
+├─ data/ (gitignored)
+│   └─ raw/
+├─ indexes/
+│   └─ all/
+├─ keyword_json/
+├─ llm/
+├─ rag_finance/
+│   ├─ ingestion/
+│   ├─ chunking/
+│   ├─ indexing/
+│   ├─ entities/
+│   └─ retrieval/
+└─ scripts/
+    ├─ build_index.py
+    └─ generate_report.py
+```
+
+Configuration Tips
+- Set `retrieval.ce.enable: false` to disable Cross-Encoder reranking on CPU-limited setups.
+- Rebuild the FAISS index after changing data or parameters.
+- `requirements.txt` includes Groq SDK (`groq`) and `python-dotenv`. Store `GROQ_API_KEY` in `.env` for convenience.
+
+Changelog (Summary)
+- 0.3.2: Document data exclusion (`data/` gitignored) and data placement steps.
+- 0.3.1: Consolidate dependencies into a single `requirements.txt`.
+- 0.3.0: Add Groq LLM report generation CLI.
