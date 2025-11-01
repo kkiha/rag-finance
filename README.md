@@ -165,7 +165,7 @@ This repository is a capstone project (Hanyang University, Data Science, 2025). 
 ### Note on Data
 - For size and copyright reasons, raw texts under `data/` are NOT included in the repository. Please place your own data locally following the instructions below.
 
-Quick Start
+### Quick Start
 
 1) Environment
 - Create a virtual environment and install dependencies.
