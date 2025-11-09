@@ -92,6 +92,7 @@ def build_messages(
     query: str,
     few_shot_examples: Sequence[Tuple[str, str]] | None = None,
     style_hint: str = "",
+    tabular_text: str = "",
 ) -> List[Dict[str, str]]:
     """Build Groq chat messages using the unified prompt template."""
     system_lines = [
@@ -118,13 +119,21 @@ def build_messages(
             messages.append({"role": "user", "content": shot_input})
             messages.append({"role": "assistant", "content": shot_output})
 
-    user_prompt = (
-        "[참고 문서]\n"
-        "아래는 최신 수집 문서에서 발췌한 내용이야. 리포트 작성시 이 정보를 우선적으로 활용해 줘.\n\n"
-        f"{context_text.strip()}\n\n"
-        "[질문]\n"
-        f"{query.strip()}"
-    )
+    user_sections: List[str] = []
+    tabular_section = tabular_text.strip()
+    if tabular_section:
+        user_sections.append("[정형 데이터]\n" + tabular_section)
+
+    context_section = context_text.strip()
+    if context_section:
+        user_sections.append(
+            "[참고 문서]\n"
+            "아래는 최신 수집 문서에서 발췌한 내용이야. 리포트 작성시 이 정보를 우선적으로 활용해 줘.\n\n"
+            + context_section
+        )
+
+    user_sections.append("[질문]\n" + query.strip())
+    user_prompt = "\n\n".join(user_sections)
     messages.append({"role": "user", "content": user_prompt})
     return messages
 
@@ -144,6 +153,7 @@ def generate_finance_report(
     max_tokens: int = 1024,
     max_chars_per_doc: int = 1200,
     max_total_chars: int = 12_000,
+    tabular_text: str = "",
 ) -> Tuple[str, List[Dict[str, str]], str]:
     """Run the Groq completion call and return (report_text, sent_messages, context_text)."""
     context_text = documents_to_context(
@@ -165,6 +175,7 @@ def generate_finance_report(
         query=query,
         few_shot_examples=few_shot_examples,
         style_hint=style_hint,
+        tabular_text=tabular_text,
     )
 
     response = client.chat.completions.create(
@@ -175,30 +186,56 @@ def generate_finance_report(
         top_p=top_p,
     )
     report_text = response.choices[0].message.content.strip()
-    return report_text, messages, context_text
+
+    combined_context_parts = [part.strip() for part in (tabular_text, context_text) if part and part.strip()]
+    combined_context = "\n\n".join(combined_context_parts)
+
+    return report_text, messages, combined_context
 
 
 def format_report_sections(text: str, width: int = 92) -> str:
     """Pretty-print the Groq response with simple section headers."""
-    sections = {
-        "[Title]": "제목",
-        "[Summary]": "요약",
-        "[Table]": "테이블",
-        "[Analysis]": "분석",
-        "[Opinion]": "투자의견",
+    section_map = {
+        "Title": "제목",
+        "Summary": "요약",
+        "Table": "테이블",
+        "Analysis": "분석",
+        "Opinion": "투자의견",
     }
 
-    lines = []
-    current_label = None
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line:
+    parsed = parse_report_sections(text)
+    lines: List[str] = []
+
+    for key in ("Title", "Summary", "Table", "Analysis", "Opinion"):
+        content = parsed.get(key, "").strip()
+        if not content:
             continue
-        if line in sections:
-            current_label = sections[line]
-            lines.append(f"\n{current_label}\n" + "-" * len(current_label))
-            continue
-        wrapped = textwrap.fill(line, width=width, subsequent_indent="    ")
-        lines.append(wrapped)
+        label = section_map[key]
+        lines.append(f"\n{label}\n" + "-" * len(label))
+        for line in content.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            wrapped = textwrap.fill(stripped, width=width, subsequent_indent="    ")
+            lines.append(wrapped)
 
     return "\n".join(lines).strip()
+
+
+def parse_report_sections(text: str) -> Dict[str, str]:
+    """Parse the structured report text into section-to-content mapping."""
+    markers = {"[Title]": "Title", "[Summary]": "Summary", "[Table]": "Table", "[Analysis]": "Analysis", "[Opinion]": "Opinion"}
+    current_key: Optional[str] = None
+    collected: Dict[str, List[str]] = {value: [] for value in markers.values()}
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line in markers:
+            current_key = markers[line]
+            continue
+        if current_key:
+            collected[current_key].append(line)
+
+    return {key: "\n".join(value).strip() for key, value in collected.items() if value}

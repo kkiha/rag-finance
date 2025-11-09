@@ -4,7 +4,7 @@
 
 핵심 아이디어는 Retrieval-Augmented Generation(RAG)을 중심으로, (1) 원문 데이터 정제와 임베딩 인덱스 구축, (2) 기업 메타데이터와 키워드에 기반한 하이브리드 검색, (3) Groq LLM과 Few-shot 프롬프트를 이용한 한국어 리포트 생성으로 이어지는 전체 자동화 흐름을 제공하는 것입니다. 아래 설명에는 프로젝트에서 채택한 아키텍처와 사용 방법을 정리해 두었습니다.
 
-> 참고: 용량 이슈로 인해 `data/` 디렉터리의 원문 텍스트는 Git 저장소에 포함되지 않습니다. 레포지토리를 클론한 뒤 직접 데이터를 배치해야 하며, 아래 “데이터 배치” 절차를 따르세요.
+> 참고: 용량 이슈로 인해 `data/` 원문 텍스트와 `tabular_db/` 재무·주가 JSON은 Git 저장소에 포함되지 않습니다. 레포지토리를 클론한 뒤 직접 데이터를 배치해야 하며, 아래 “데이터 배치” 절차를 따르세요.
 
 -------------------------------------------------------------------------------
 핵심 워크플로
@@ -26,7 +26,7 @@
    - `retrieval.ce.enable: true`일 때만 Cross-Encoder(`BAAI/bge-reranker-v2-m3`)로 상위 후보를 재점수화하고 가중합합니다.  
    - `apply_mmr_after`가 `true`이면 MMR로 유사 후보를 제거하고 최종 상위 `k`개 문서를 반환합니다.
 
-5. **LLM 리포트 생성** (`scripts.generate_report`)  
+5. **LLM 리포트 생성 & 리포트 후처리** (`scripts.generate_report`)  
    - Retrieval로 얻은 `Document` 리스트를 요약/정리해 Groq LLM에 전달할 컨텍스트로 직렬화합니다.  
    - 모델 호출 시 메시지 구조는 아래와 같습니다.
      ```text
@@ -51,6 +51,8 @@
      ```
    - (선택사항) 필요 시 few-shot 예시(JSONL)를 순차적으로 `[User] → [Assistant]` 메시지로 삽입한 뒤 위 템플릿을 붙입니다.  
    - Groq SDK(`groq 패키지`)로 `llama3-70b-8192` 모델을 호출하며, 출력은 `[Title]/[Summary]/[Table]/[Analysis]/[Opinion]` 포맷으로 반환됩니다.
+   - `tabular_db/`에 저장된 재무(`finance_*.json`)·주가(`stock_*.json`) 요약을 찾아 LLM 메시지에 함께 주입해 분석 정확도를 높입니다.
+   - 생성된 리포트는 기본 텍스트와 더불어 `reportlab` 기반 PDF로도 저장할 수 있습니다.
 
 -------------------------------------------------------------------------------
 빠른 시작
@@ -78,6 +80,7 @@
    mkdir data\raw\Report
    ```
 - 노트북에서 사용한 원본 텍스트(`.txt/.html/.json` 등)를 `data/raw/News`, `data/raw/Report` 등으로 분류해 넣습니다. 하위 폴더명은 자동 타입 판별에 활용됩니다.
+- (선택) 정형 데이터 주입을 활용하려면 `tabular_db/finance_{회사명}.json`, `tabular_db/stock_{회사명}.json` 형태로 재무제표·주가 요약 파일을 준비합니다.
 - 회사별 키워드는 `keyword_json/{회사명}_keyword.json` 형식으로 저장합니다.
 
 3) **인덱스 생성**
@@ -92,7 +95,7 @@ python -m rag_finance.cli.main retrieve --config configs/default.yaml --q "삼�
 ```
 출력에는 디버그 정보(기업/종목코드, 선택 키워드, 풀 크기 등)와 상위 근거 스니펫이 포함됩니다. CE가 활성화되어 있으면 `[rerank] CE scoring` 진행률이 표시됩니다.
 
-5) **Groq API로 리포트 생성**
+5) **Groq API로 리포트 생성 & PDF 저장**
 - Groq API Key(`GROQ_API_KEY`)를 환경변수로 설정하거나 `.env` 파일에 저장합니다.
 - few-shot 예시(JSONL)가 있는 경우 `--examples-dir` 인자를 통해 전달할 수 있습니다.
 - CLI 실행
@@ -102,10 +105,13 @@ python -m rag_finance.cli.main retrieve --config configs/default.yaml --q "삼�
          --q "삼성전자의 최근 동향에 대한 한국어 리포트를 작성해 줘." `
          --topk 10 `
          --model llama-3.3-70b-versatile `
-         --output reports/samsung_latest.txt
+      --output reports/samsung_latest.txt `
+      --tabular-dir tabular_db `
+      --pdf-output reports/samsung_latest.pdf
    ```
 - 실행 후 `reports/` 폴더에 `[Title]/[Summary]/[Table]/[Analysis]/[Opinion]` 형식의 리포트가 생성됩니다.
 - Retrieval 근거를 파일로 남기려면 `--context-out logs/context.json --docs-out logs/retrieved_docs.json` 등을 추가하세요.
+- PDF 저장 옵션을 사용하면 텍스트 본문과 `tabular_db` 데이터를 조합한 서식화된 리포트가 함께 생성됩니다.
 
 -------------------------------------------------------------------------------
 구성 요약
@@ -117,6 +123,7 @@ rag-finance/
 │   └─ default.yaml                # 노트북 하이퍼파라미터와 동일한 설정
 ├─ data/ (gitignored)
 │   └─ raw/                        # 원본 텍스트 (News/Report 등 하위 폴더 권장)
+├─ tabular_db/                     # 재무/주가 요약 JSON (finance_*.json, stock_*.json)
 ├─ indexes/
 │   └─ all/                        # build_index 실행 시 생성되는 FAISS 인덱스
 ├─ keyword_json/                   # 회사별 키워드 JSON
@@ -138,11 +145,14 @@ rag-finance/
 
 - `retrieval.ce.enable: false`로 두면 CE 없이 하이브리드 점수만으로 랭킹합니다. CPU 환경에서 유용합니다.
 - 새로운 데이터를 넣거나 설정을 바꾸면 반드시 `build_index`를 다시 실행해 인덱스를 최신화하세요.
-- `requirements.txt`에는 노트북에서 사용한 핵심 라이브러리만 포함했습니다. 필요 시 `langchain`, `sentence-transformers`, `faiss-cpu` 혹은 GPU 대응 패키지를 추가로 설치해야 할 수 있습니다.
+- 정형 데이터 활용 시 `--tabular-dir`에 디렉터리를 지정해 자동으로 JSON을 찾게 할 수 있습니다.
+- PDF 출력 기능을 쓰려면 `reportlab` 설치가 필요하며, 윈도우에서는 CJK 폰트가 설치되어 있어야 합니다.
+- `requirements.txt`에는 핵심 라이브러리와 Groq 연동, PDF 생성을 위한 `reportlab`이 포함됩니다.
 - Groq API를 활용한 리포트 생성 기능을 사용하려면 `groq` Python SDK와 API Key가 필요합니다. `.env`에 `GROQ_API_KEY`를 저장하면 CLI에서 자동으로 불러옵니다.
 
-변경 로그
+- 변경 로그
 
+- 0.3.3: `tabular_db` 기반 재무/주가 JSON 주입, PDF 리포트 옵션, README 다국어 업데이트
 - 0.3.2: `data/` 디렉터리 Git 제외 안내 및 데이터 배치 절차 업데이트
 - 0.3.1: Groq 관련 의존성을 기본 `requirements.txt`로 통합
 - 0.3.0: Groq LLM을 이용한 리포트 생성 CLI/유틸 추가
@@ -163,7 +173,7 @@ This repository is a capstone project (Hanyang University, Data Science, 2025). 
 - LLM Report Generation: Serialize retrieved documents into context and call Groq LLM to produce a standardized report: `[Title] / [Summary] / [Table] / [Analysis] / [Opinion]`.
 
 ### Note on Data
-- For size and copyright reasons, raw texts under `data/` are NOT included in the repository. Please place your own data locally following the instructions below.
+- For size and copyright reasons, raw texts under `data/` and tabular summaries under `tabular_db/` are NOT included in the repository. Please place your own data locally following the instructions below.
 
 ### Quick Start
 
@@ -177,14 +187,16 @@ This repository is a capstone project (Hanyang University, Data Science, 2025). 
 - If you don’t have a GPU, set `embedding.device` and `retrieval.ce.device` to `cpu` in `configs/default.yaml`.
 
 2) Data Placement
-- Create directories and copy your raw texts.
+- Create directories and copy your raw texts and optional tabular summaries.
    ```powershell
    mkdir data
    mkdir data\raw
    mkdir data\raw\News
    mkdir data\raw\Report
+   mkdir tabular_db
    ```
 - Put `.txt/.html/.json` files into `data/raw/News` and `data/raw/Report` (folder names help auto-typing).
+- (Optional) Place `finance_{Company}.json` and `stock_{Company}.json` under `tabular_db/` to enable tabular augmentation.
 - Company keyword files go to `keyword_json/{CompanyName}_keyword.json`.
 
 3) Build Index
@@ -197,7 +209,7 @@ python -m scripts.build_index --config configs/default.yaml
 python -m rag_finance.cli.main retrieve --config configs/default.yaml --q "삼성전자의 최근 동향에 대한 한국어 리포트를 작성해 줘." --topk 10
 ```
 
-5) Generate Report with Groq LLM
+5) Generate Report with Groq LLM & Export PDF
 - Set `GROQ_API_KEY` via environment or `.env`.
 - Run CLI:
    ```powershell
@@ -206,12 +218,15 @@ python -m rag_finance.cli.main retrieve --config configs/default.yaml --q "삼�
             --q "삼성전자의 최근 동향에 대한 한국어 리포트를 작성해 줘." `
             --topk 10 `
             --model llama-3.3-70b-versatile `
-            --output reports/samsung_latest.txt
+            --output reports/samsung_latest.txt `
+            --tabular-dir tabular_db `
+            --pdf-output reports/samsung_latest.pdf
    ```
 - To persist retrieval artifacts, add:
    ```powershell
    --context-out logs/context.json --docs-out logs/retrieved_docs.json
    ```
+- PDF export combines the generated text with tabular JSON data to produce a formatted report.
 
 ### Project Structure
 ```
@@ -223,6 +238,7 @@ rag-finance/
 ├─ indexes/
 │   └─ all/
 ├─ keyword_json/
+├─ tabular_db/ (gitignored)
 ├─ llm/
 ├─ rag_finance/
 │   ├─ ingestion/
@@ -238,9 +254,12 @@ rag-finance/
 ### Configuration Tips
 - Set `retrieval.ce.enable: false` to disable Cross-Encoder reranking on CPU-limited setups.
 - Rebuild the FAISS index after changing data or parameters.
+- Use `--tabular-dir` to point at a folder containing `finance_*.json` and `stock_*.json` files; the CLI will match them with the detected company.
+- Install `reportlab` (already listed in `requirements.txt`) and ensure appropriate Korean fonts are available for PDF rendering.
 - `requirements.txt` includes Groq SDK (`groq`) and `python-dotenv`. Store `GROQ_API_KEY` in `.env` for convenience.
 
 ### Changelog (Summary)
+- 0.3.3: Add tabular data ingestion (`tabular_db`) and PDF export option.
 - 0.3.2: Document data exclusion (`data/` gitignored) and data placement steps.
 - 0.3.1: Consolidate dependencies into a single `requirements.txt`.
 - 0.3.0: Add Groq LLM report generation CLI.

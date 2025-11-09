@@ -4,16 +4,18 @@ import argparse
 import json
 import os
 import sys
-from typing import Optional
+from typing import Dict, Optional
 
 from groq import Groq
 
 from rag_finance.config import load_config
 from rag_finance.indexing.faiss_index import _build_embedding
 from rag_finance.llm import generate_finance_report
-from rag_finance.llm.report_generator import format_report_sections
+from rag_finance.llm.report_generator import format_report_sections, parse_report_sections
 from rag_finance.retrieval.pipeline import retrieve_with_keywords
-from rag_finance.utils.io_utils import write_text
+from rag_finance.utils.io_utils import read_json, write_text
+from rag_finance.utils.pdf_utils import export_report_pdf
+from rag_finance.utils.tabular_format import format_tabular_prompt
 
 try:  # 선택 의존성
     from dotenv import load_dotenv  # type: ignore
@@ -74,6 +76,44 @@ def _serialize_docs(docs):
     return serialized
 
 
+def _load_tabular_payload(tabular_dir: Optional[str], company: Optional[str]) -> Optional[Dict[str, object]]:
+    if not tabular_dir:
+        return None
+    if not os.path.isdir(tabular_dir):
+        print(f"[generate_report] tabular_dir가 존재하지 않습니다: {tabular_dir}", file=sys.stderr)
+        return None
+    if not company:
+        print("[generate_report] 기업명을 찾지 못해 tabular 데이터를 건너뜁니다.", file=sys.stderr)
+        return None
+
+    normalized = company.replace(" ", "")
+    finance_path = os.path.join(tabular_dir, f"finance_{normalized}.json")
+    stock_path = os.path.join(tabular_dir, f"stock_{normalized}.json")
+
+    payload: Dict[str, object] = {"company": company}
+    loaded_any = False
+
+    if os.path.isfile(finance_path):
+        try:
+            payload["finance"] = read_json(finance_path)
+            loaded_any = True
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"[generate_report] 재무 JSON을 읽지 못했습니다 ({finance_path}): {exc}", file=sys.stderr)
+
+    if os.path.isfile(stock_path):
+        try:
+            payload["stock"] = read_json(stock_path)
+            loaded_any = True
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"[generate_report] 주가 JSON을 읽지 못했습니다 ({stock_path}): {exc}", file=sys.stderr)
+
+    if not loaded_any:
+        print(f"[generate_report] tabular 데이터를 찾지 못했습니다 (company={company}).", file=sys.stderr)
+        return None
+
+    return payload
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate a finance report with Groq LLM")
     parser.add_argument("--config", default="configs/default.yaml", help="설정 파일 경로")
@@ -99,6 +139,8 @@ def main() -> None:
     parser.add_argument("--docs-chars", type=int, default=320, help="문서 스니펫 최대 문자 수")
     parser.add_argument("--print-messages", action="store_true", help="Groq에 전달한 메시지 출력")
     parser.add_argument("--quiet", action="store_true", help="Retrieval 진행률 숨김")
+    parser.add_argument("--tabular-dir", help="정형 데이터(JSON) 디렉터리")
+    parser.add_argument("--pdf-output", help="생성 리포트를 PDF로 저장할 경로")
     args = parser.parse_args()
 
     try:
@@ -137,6 +179,15 @@ def main() -> None:
 
     include_few_shot = not args.no_few_shot
 
+    tabular_payload = _load_tabular_payload(args.tabular_dir, debug_info.get("company"))
+    tabular_text = format_tabular_prompt(tabular_payload)
+    if tabular_payload:
+        finance_rows = len((tabular_payload.get("finance") or {}))
+        stock_rows = len(((tabular_payload.get("stock") or {}).get("monthly_prices") or {}))
+        print(
+            f"[generate_report] tabular 로드: finance_years={finance_rows} monthly_points={stock_rows}"
+        )
+
     report_text, messages, context_text = generate_finance_report(
         client=client,
         query=args.q,
@@ -149,6 +200,7 @@ def main() -> None:
         temperature=args.temperature,
         top_p=args.top_p,
         max_tokens=args.max_tokens,
+        tabular_text=tabular_text,
     )
 
     if args.print_context:
@@ -166,6 +218,14 @@ def main() -> None:
         write_text(args.output, report_text)
         print(f"[generate_report] 리포트 저장: {args.output}")
 
+    if args.pdf_output:
+        sections = parse_report_sections(report_text)
+        try:
+            export_report_pdf(args.pdf_output, sections, tabular_payload)
+            print(f"[generate_report] PDF 저장: {args.pdf_output}")
+        except RuntimeError as exc:
+            print(f"[generate_report] PDF 저장 실패: {exc}", file=sys.stderr)
+
     if args.context_out:
         write_text(args.context_out, context_text)
         print(f"[generate_report] 컨텍스트 저장: {args.context_out}")
@@ -175,6 +235,9 @@ def main() -> None:
             "model": args.model,
             "messages": messages,
             "debug": debug_info,
+            "tabular_text": tabular_text,
+            "tabular_company": debug_info.get("company"),
+            "tabular_payload": tabular_payload,
         }
         write_text(args.messages_out, json.dumps(payload, ensure_ascii=False, indent=2))
         print(f"[generate_report] 메시지 로그 저장: {args.messages_out}")
