@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import importlib
 import os
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from rag_finance.utils.io_utils import ensure_dir
 from rag_finance.utils.tabular_format import (
@@ -149,42 +149,45 @@ def export_report_pdf(
         story.append(Paragraph(title_text, title_style))
 
     if tabular_payload:
-        company = str(tabular_payload.get("company") or "").strip()
         finance_rows = build_finance_rows(tabular_payload.get("finance"))
         summary_rows = build_stock_summary_rows(tabular_payload.get("stock"))
         monthly_rows = build_stock_monthly_rows(tabular_payload.get("stock"))
 
-        if company or finance_rows or summary_rows or monthly_rows:
-            story.append(Paragraph("정형 데이터", section_title_style))
-            if company:
-                story.append(Paragraph(f"기업명: {company}", body_style))
-
+        if finance_rows or summary_rows or monthly_rows:
             if finance_rows:
                 story.append(Paragraph("재무 요약", subheading_style))
                 story.append(_build_table(finance_rows, base_font))
+                story.append(Spacer(1, 10))
             if summary_rows:
-                story.append(Spacer(1, 6))
                 story.append(Paragraph("주요 주가 통계", subheading_style))
                 story.append(_build_table(summary_rows, base_font))
+                story.append(Spacer(1, 10))
             if monthly_rows:
-                story.append(Spacer(1, 6))
                 story.append(Paragraph("최근 월별 종가", subheading_style))
                 story.append(_build_table(monthly_rows, base_font))
+                story.append(Spacer(1, 14))
 
-            story.append(Spacer(1, 12))
+    section_order = [
+        ("Summary", "요약"),
+        ("Analysis", "분석"),
+        ("Opinion", "투자의견"),
+        ("Table", "테이블 요약"),
+    ]
 
-    section_labels = {
-        "Summary": "요약",
-        "Table": "테이블",
-        "Analysis": "분석",
-        "Opinion": "투자의견",
-    }
-
-    for key, label in section_labels.items():
+    for key, label in section_order:
         content = sections.get(key, "").strip()
         if not content:
             continue
         story.append(Paragraph(label, section_title_style))
+        if key == "Table":
+            table_rows, other_lines = _parse_markdown_table(content)
+            if table_rows:
+                story.append(_build_table(table_rows, base_font))
+            for text_line in other_lines:
+                story.append(Paragraph(text_line, body_style))
+            story.append(Spacer(1, 10))
+            continue
+
         for line in content.splitlines():
             text = line.strip()
             if not text:
@@ -199,3 +202,39 @@ def export_report_pdf(
         story.append(Paragraph("생성된 리포트 내용이 없습니다.", body_style))
 
     doc.build(story)
+
+
+def _parse_markdown_table(section_text: str) -> Tuple[List[List[str]], List[str]]:
+    table_lines: List[str] = []
+    other_lines: List[str] = []
+    for raw in section_text.splitlines():
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("|") and stripped.count("|") >= 2:
+            table_lines.append(stripped)
+        else:
+            other_lines.append(stripped)
+
+    if not table_lines:
+        return [], other_lines
+
+    rows: List[List[str]] = []
+    for idx, line in enumerate(table_lines):
+        trimmed = line.strip().strip("|")
+        cells = [cell.strip() for cell in trimmed.split("|")]
+        if idx == 1 and all(set(cell.replace(":", "")) <= {"-"} for cell in cells):
+            continue
+        rows.append(cells)
+
+    if not rows:
+        return [], other_lines
+
+    max_len = max(len(row) for row in rows)
+    normalized: List[List[str]] = []
+    for row in rows:
+        if len(row) < max_len:
+            row = row + [""] * (max_len - len(row))
+        normalized.append(row)
+
+    return normalized, other_lines

@@ -16,34 +16,75 @@ def _humanize_number(value: Any) -> str:
     return str(value)
 
 
+def _format_percent_change(current: Any, previous: Any) -> Optional[str]:
+    try:
+        cur = float(current)
+        prev = float(previous)
+    except (TypeError, ValueError):
+        return None
+    if prev == 0:
+        return None
+    change = ((cur - prev) / abs(prev)) * 100.0
+    sign = "+" if change >= 0 else ""
+    return f"{sign}{change:.1f}%"
+
+
+def _format_absolute_change(current: Any, previous: Any) -> Optional[str]:
+    try:
+        cur = float(current)
+        prev = float(previous)
+    except (TypeError, ValueError):
+        return None
+    diff = cur - prev
+    sign = "+" if diff >= 0 else ""
+    return f"{sign}{_humanize_number(diff)}"
+
+
 def format_tabular_prompt(
     payload: Optional[Dict[str, Any]],
     *,
-    max_finance_years: int = 5,
-    max_months: int = 6,
+    max_finance_years: int = 3,
+    max_months: int = 3,
 ) -> str:
     if not payload:
         return ""
 
     sections: List[str] = []
 
-    company = str(payload.get("company") or "").strip()
-    if company:
-        sections.append(f"기업명: {company}")
-
     finance_data = payload.get("finance")
     if isinstance(finance_data, dict) and finance_data:
         years = sorted(finance_data.keys(), reverse=True)
-        finance_lines = ["최근 재무지표 (단위: 원)"]
-        for year in years[:max_finance_years]:
-            metrics = finance_data.get(year, {})
+        selected_years = years[:max_finance_years]
+        finance_lines = ["최근 재무 추이 요약 (단위: 원, %)"]
+        for idx, year in enumerate(selected_years):
+            metrics = finance_data.get(year, {}) or {}
             if not isinstance(metrics, dict):
                 continue
-            formatted_metrics = ", ".join(
-                f"{k}={_humanize_number(v)}"
-                for k, v in metrics.items()
-            )
-            finance_lines.append(f"- {year}: {formatted_metrics}")
+            revenue = metrics.get("매출액")
+            operating = metrics.get("영업이익")
+            margin = metrics.get("영업이익률")
+
+            rev_change = None
+            op_change = None
+            if idx + 1 < len(selected_years):
+                prev_year_key = selected_years[idx + 1]
+                prev_metrics = finance_data.get(prev_year_key, {}) or {}
+                rev_change = _format_percent_change(revenue, prev_metrics.get("매출액"))
+                op_change = _format_percent_change(operating, prev_metrics.get("영업이익"))
+
+            margin_txt = f"영업이익률 {margin:.2f}%" if isinstance(margin, (int, float)) else "영업이익률 정보 없음"
+            line_parts = [
+                f"매출액 {_humanize_number(revenue) if revenue is not None else '정보 없음'}",
+                f"영업이익 {_humanize_number(operating) if operating is not None else '정보 없음'}",
+                margin_txt,
+            ]
+            if rev_change:
+                line_parts.append(f"매출 전년 대비 {rev_change}")
+            if op_change:
+                line_parts.append(f"영업이익 전년 대비 {op_change}")
+
+            finance_lines.append(f"- {year}: " + ", ".join(line_parts))
+
         if len(finance_lines) > 1:
             sections.append("\n".join(finance_lines))
 
@@ -56,18 +97,45 @@ def format_tabular_prompt(
 
         summary = stock_data.get("summary")
         if isinstance(summary, dict) and summary:
-            stock_lines.append("주요 주가 통계")
-            for key, value in summary.items():
-                stock_lines.append(f"- {key}: {_humanize_number(value)}")
+            max_price = summary.get("max_price")
+            min_price = summary.get("min_price")
+            avg_price = summary.get("avg_price")
+            stock_lines.append(
+                "주요 통계: "
+                + ", ".join(
+                    part for part in [
+                        f"최고가 {_humanize_number(max_price)}" if max_price is not None else None,
+                        f"최저가 {_humanize_number(min_price)}" if min_price is not None else None,
+                        f"평균가 {_humanize_number(avg_price)}" if avg_price is not None else None,
+                    ]
+                    if part
+                )
+            )
+            if summary.get("std_dev") is not None:
+                stock_lines.append(f"표준편차 {_humanize_number(summary.get('std_dev'))}")
+            if summary.get("avg_volume") is not None:
+                stock_lines.append(f"평균 거래량 {_humanize_number(summary.get('avg_volume'))}")
 
         monthly = stock_data.get("monthly_prices")
         if isinstance(monthly, dict) and monthly:
             monthly_items = sorted(monthly.items())
             if max_months > 0:
                 monthly_items = monthly_items[-max_months:]
-            stock_lines.append("최근 월별 종가")
-            for month, price in monthly_items:
-                stock_lines.append(f"- {month}: {_humanize_number(price)}")
+            if monthly_items:
+                month_lines = [f"{month}: {_humanize_number(price)}" for month, price in monthly_items]
+                stock_lines.append("최근 월별 종가: " + "; ".join(month_lines))
+                if len(monthly_items) >= 2:
+                    last_month, last_price = monthly_items[-1]
+                    prev_month, prev_price = monthly_items[-2]
+                    abs_change = _format_absolute_change(last_price, prev_price)
+                    pct_change = _format_percent_change(last_price, prev_price)
+                    trend_parts = []
+                    if abs_change:
+                        trend_parts.append(f"전월 대비 {abs_change}")
+                    if pct_change:
+                        trend_parts.append(pct_change)
+                    if trend_parts:
+                        stock_lines.append(f"최근 추세: {prev_month}→{last_month}, " + ", ".join(trend_parts))
 
         if stock_lines:
             sections.append("\n".join(stock_lines))
