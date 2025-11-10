@@ -172,7 +172,7 @@ This repository is a capstone project (Hanyang University, Data Science, 2025). 
 - LLM Report Generation: Serialize retrieved documents into context and call Groq LLM to produce a standardized report: `[Title] / [Summary] / [Table] / [Analysis] / [Opinion]`.
 
 ### Note on Data
-- For size and copyright reasons, raw texts under `data/` and tabular summaries under `tabular_db/` are NOT included in the repository. Please place your own data locally following the instructions below.
+- For size and copyright reasons, raw texts under `data/` is NOT included in the repository. Please place your own data locally following the instructions below.
 
 ### Quick Start
 
@@ -195,7 +195,6 @@ This repository is a capstone project (Hanyang University, Data Science, 2025). 
    mkdir tabular_db
    ```
 - Put `.txt/.html/.json` files into `data/raw/News` and `data/raw/Report` (folder names help auto-typing).
-- (Optional) Place `finance_{Company}.json` and `stock_{Company}.json` under `tabular_db/` to enable tabular augmentation.
 - Company keyword files go to `keyword_json/{CompanyName}_keyword.json`.
 
 3) Build Index
