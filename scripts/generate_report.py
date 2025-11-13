@@ -119,7 +119,7 @@ def main() -> None:
     parser.add_argument("--config", default="configs/default.yaml", help="설정 파일 경로")
     parser.add_argument("--q", required=True, help="사용자 질의")
     parser.add_argument("--topk", type=int, default=10, help="Retrieval 결과 문서 수")
-    parser.add_argument("--model", default="llama3-70b-8192", help="Groq 모델 이름")
+    parser.add_argument("--model", default="llama-3.3-70b-versatile", help="Groq 모델 이름")
     parser.add_argument("--api-key", help="Groq API Key (미지정 시 환경변수 사용)")
     parser.add_argument("--env-file", help=".env 파일 경로")
     parser.add_argument("--examples-dir", help="few-shot JSONL 디렉터리")

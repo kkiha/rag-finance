@@ -61,7 +61,7 @@
      {사용자 질의(e.g. {기업명}의 최근 동향에 대한 한국어 리포트를 작성해 줘.)}
      ```
    - (선택사항) 필요 시 few-shot 예시(JSONL)를 순차적으로 `[User] → [Assistant]` 메시지로 삽입한 뒤 위 템플릿을 붙입니다.  
-   - Groq SDK(`groq 패키지`)로 `llama3-70b-8192` 모델을 호출하며, 출력은 `[Title]/[Summary]/[Table]/[Analysis]/[Opinion]` 포맷으로 반환됩니다.
+   - Groq SDK(`groq 패키지`)로 `llama-3.3-70b-versatile` 모델을 호출하며, 출력은 `[Title]/[Summary]/[Table]/[Analysis]/[Opinion]` 포맷으로 반환됩니다.
    - `tabular_db/`에 저장된 재무(`finance_*.json`)·주가(`stock_*.json`) 요약을 찾아 LLM 메시지에 함께 주입해 분석 정확도를 높입니다.
    - 생성된 리포트는 기본 텍스트와 더불어 `reportlab` 기반 PDF로도 저장할 수 있습니다.
 

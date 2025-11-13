@@ -147,7 +147,7 @@ def generate_finance_report(
     client: Groq,
     query: str,
     docs: Sequence[Document],
-    model: str = "llama3-70b-8192",
+    model: str = "llama-3.3-70b-versatile",
     few_shot_dir: Optional[str] = None,
     few_shot_max_examples: int = 1,
     include_few_shot: bool = True,
