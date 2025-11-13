@@ -2,7 +2,7 @@
 
 이 저장소는 **한양대학교 데이터사이언스학부 2025 졸업프로젝트** “RAG 기반 증권 리포트 자동화”를 위해 구축한 코드베이스입니다. 목표는 최신 금융 뉴스·애널리스트 리포트를 검색·활용해 **주식 리포트를 자동으로 생성**하는 End-to-End 파이프라인을 구현하고 운영 효율성과 리서치 품질을 동시에 향상시키는 것입니다.
 
-핵심 아이디어는 Retrieval-Augmented Generation(RAG)을 중심으로, (1) 원문 데이터 정제와 임베딩 인덱스 구축, (2) 기업 메타데이터와 키워드에 기반한 하이브리드 검색, (3) Groq LLM과 Few-shot 프롬프트를 이용한 한국어 리포트 생성으로 이어지는 전체 자동화 흐름을 제공하는 것입니다. 아래 설명에는 프로젝트에서 채택한 아키텍처와 사용 방법을 정리해 두었습니다.
+핵심 아이디어는 Retrieval-Augmented Generation(RAG)을 중심으로, (1) 원문 데이터 정제와 임베딩 인덱스 구축, (2) 기업 메타데이터와 키워드에 기반한 하이브리드 검색, (3) Groq LLM과 Few-shot 프롬프트(필요시)를 이용한 한국어 리포트 생성으로 이어지는 전체 자동화 흐름을 제공하는 것입니다. 아래 설명에는 프로젝트에서 채택한 아키텍처와 사용 방법을 정리해 두었습니다.
 
 > 참고: 용량 이슈로 인해 `data/` 원문 텍스트는 Git 저장소에 포함되지 않습니다. 레포지토리를 클론한 뒤 직접 데이터를 배치해야 하며, 아래 “데이터 배치” 절차를 따르세요.
 
@@ -107,7 +107,7 @@ python -m rag_finance.cli.main retrieve --config configs/default.yaml --q "삼�
 
 5) **Groq API로 리포트 생성 & PDF 저장**
 - Groq API Key(`GROQ_API_KEY`)를 환경변수로 설정하거나 `.env` 파일에 저장합니다.
-- few-shot 예시(JSONL)가 있는 경우 `--examples-dir` 인자를 통해 전달할 수 있습니다.
+- (선택) few-shot 예시(JSONL)가 있는 경우 `--examples-dir` 인자를 통해 전달할 수 있습니다.
 - CLI 실행
    ```powershell
    python -m scripts.generate_report `
@@ -130,14 +130,14 @@ python -m rag_finance.cli.main retrieve --config configs/default.yaml --q "삼�
 ```
 rag-finance/
 ├─ configs/
-│   └─ default.yaml                # 노트북 하이퍼파라미터와 동일한 설정
+│   └─ default.yaml                # Retrieval시 사용하는 하이퍼파라미터 설정
 ├─ data/ (gitignored)
 │   └─ raw/                        # 원본 텍스트 (News/Report 등 하위 폴더 권장)
 ├─ tabular_db/                     # 재무/주가 요약 JSON (finance_*.json, stock_*.json)
 ├─ indexes/
 │   └─ all/                        # build_index 실행 시 생성되는 FAISS 인덱스
 ├─ keyword_json/                   # 회사별 키워드 JSON
-├─ llm/                            # Groq few-shot 예시, 프롬프트 템플릿, 출력 저장소
+├─ llm/                            # Groq few-shot 예시, 프롬프트 템플릿, 출력 저장소 (선택)
 ├─ rag_finance/
 │   ├─ ingestion/                  # 파일 로딩·정제 로직
 │   ├─ chunking/                   # 청킹 + 기업 메타데이터 주입
@@ -145,7 +145,7 @@ rag-finance/
 │   ├─ entities/                   # 기업·키워드 유틸
 │   └─ retrieval/                  # BM25+FAISS+RRF+CE+MMR 파이프라인
 └─ scripts/
-   ├─ build_index.py              # 노트북 인덱스 구축 셀에 대응
+   ├─ build_index.py              # 인덱스 구축
    └─ generate_report.py          # Retrieval+LLM 생성 CLI
 ```
 
@@ -157,7 +157,7 @@ rag-finance/
 - 새로운 데이터를 넣거나 설정을 바꾸면 반드시 `build_index`를 다시 실행해 인덱스를 최신화하세요.
 - 정형 데이터 활용 시 `--tabular-dir`에 디렉터리를 지정해 자동으로 JSON을 찾게 할 수 있습니다.
 - PDF 출력 기능을 쓰려면 `reportlab` 설치가 필요하며, 윈도우에서는 CJK 폰트가 설치되어 있어야 합니다.
-- `requirements.txt`에는 핵심 라이브러리와 Groq 연동, PDF 생성을 위한 `reportlab`이 포함됩니다.
+- `requirements.txt`에는 리포트 생성을 위한 여러 핵심 라이브러리들이 포함됩니다.
 - Groq API를 활용한 리포트 생성 기능을 사용하려면 `groq` Python SDK와 API Key가 필요합니다. `.env`에 `GROQ_API_KEY`를 저장하면 CLI에서 자동으로 불러옵니다.
 
 - 변경 로그
@@ -179,11 +179,11 @@ This repository is a capstone project (Hanyang University, Data Science, 2025). 
 - Ingestion & Cleaning: Load `.txt/.html` under `data/raw/**`, remove HTML tags and unwanted phrases, and assign `source_type` using folder names (e.g., `News/Report`).
 - Chunking with Company Metadata: Split texts into ~800 chars (+100 overlap) and attach metadata (`company`, `company_code`, `chunk_id`).
 - Embedding & Indexing: Encode with `jhgan/ko-sroberta-nli` and store FAISS index under `indexes/all/`.
-- Hybrid Retrieval: Combine BM25 (hard expansion) and FAISS (soft expansion), optionally rerank with Cross-Encoder (`BAAI/bge-reranker-v2-m3`) and apply MMR.
+- Hybrid Retrieval: Combine BM25 (hard expansion) and FAISS (soft expansion), optionally rerank with Cross-Encoder (`BAAI/bge-reranker-v2-m3`) and apply MMR also optionally.
 - LLM Report Generation: Serialize retrieved documents into context and call Groq LLM to produce a standardized report: `[Title] / [Summary] / [Table] / [Analysis] / [Opinion]`.
 
 ### Note on Data
-- For size and copyright reasons, raw texts under `data/` is NOT included in the repository. Please place your own data locally following the instructions below.
+- Since the size of text data is large, raw texts under `data/` is NOT included in the repository. Please place your own data locally following the instructions below.
 
 ### Quick Start
 
@@ -241,23 +241,23 @@ python -m rag_finance.cli.main retrieve --config configs/default.yaml --q "삼�
 ```
 rag-finance/
 ├─ configs/
-│   └─ default.yaml
+│   └─ default.yaml                # Hyperparameter settings of context retrieval
 ├─ data/ (gitignored)
-│   └─ raw/
+│   └─ raw/                        # Raw texts (Making subdocuments such as News/Report is recommended)
+├─ tabular_db/                     # Summerized financial/stock JSON (finance_*.json, stock_*.json)
 ├─ indexes/
-│   └─ all/
-├─ keyword_json/
-├─ tabular_db/ (gitignored)
-├─ llm/
+│   └─ all/                        # build_index 실행 시 생성되는 FAISS 인덱스
+├─ keyword_json/                   # 회사별 키워드 JSON
+├─ llm/                            # Groq few-shot 예시, 프롬프트 템플릿, 출력 저장소 (선택)
 ├─ rag_finance/
-│   ├─ ingestion/
-│   ├─ chunking/
-│   ├─ indexing/
-│   ├─ entities/
-│   └─ retrieval/
+│   ├─ ingestion/                  # 파일 로딩·정제 로직 File loading & cleansing
+│   ├─ chunking/                   # 청킹 + 기업 메타데이터 주입 Perform chuncking + Inject corporation metadata
+│   ├─ indexing/                   # 임베딩/FAISS 저장 Save embeddings/FAISS
+│   ├─ entities/                   # 기업·키워드 유틸 Util for companies & keywords
+│   └─ retrieval/                  # BM25+FAISS+RRF+CE+MMR pipeline
 └─ scripts/
-    ├─ build_index.py
-    └─ generate_report.py
+   ├─ build_index.py              # Building indexes
+   └─ generate_report.py          # Retrieval+LLM generation CLI
 ```
 
 ### Configuration Tips
