@@ -1,6 +1,6 @@
 # rag-finance
 
-이 저장소는 **한양대학교 데이터사이언스학부 2025 졸업프로젝트** “RAG 기반 증권 리포트 자동화”를 위해 구축한 코드베이스입니다. 목표는 최신 금융 뉴스·애널리스트 리포트를 검색·활용해 **주식 리포트를 생성**하는 End-to-End 파이프라인을 구현하고 운영 효율성과 리서치 품질을 동시에 향상시키는 것입니다.
+이 저장소는 “RAG 기반 증권 리포트 자동화”를 위해 구축한 코드베이스입니다. 목표는 최신 금융 뉴스·애널리스트 리포트를 검색·활용해 **주식 리포트를 생성**하는 End-to-End 파이프라인을 구현하고 운영 효율성과 리서치 품질을 동시에 향상시키는 것입니다.
 
 핵심 아이디어는 Retrieval-Augmented Generation(RAG)을 중심으로, (1) 원문 데이터 정제와 임베딩 인덱스 구축, (2) 기업 메타데이터와 키워드에 기반한 하이브리드 검색, (3) Groq LLM과 Few-shot 프롬프트(필요시)를 이용한 한국어 리포트 생성으로 이어지는 전체 자동화 흐름을 제공하는 것입니다. 아래 설명에는 프로젝트에서 채택한 아키텍처와 사용 방법을 정리해 두었습니다.
 
@@ -171,7 +171,7 @@ rag-finance/
 
 ## Project Overview
 
-This repository is a capstone project (Hanyang University, Data Science, 2025). We build an end-to-end Retrieval-Augmented Generation (RAG) pipeline that retrieves recent Korean finance texts (news and analyst reports) and generates structured Korean stock reports using Groq LLM.
+This repository is for a capstone project. We build an end-to-end Retrieval-Augmented Generation (RAG) pipeline that retrieves recent Korean finance texts (news and analyst reports) and generates structured Korean stock reports using Groq LLM.
 
 ### Key Components
 - Ingestion & Cleaning: Load `.txt/.html` under `data/raw/**`, remove HTML tags and unwanted phrases, and assign `source_type` using folder names (e.g., `News/Report`).
